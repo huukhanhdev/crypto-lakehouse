@@ -11,3 +11,4 @@ venv/
 # local env overrides
 .env
 docker-compose.override.yml
+*.md
