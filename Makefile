@@ -1,10 +1,11 @@
 # Crypto Streaming Lakehouse — developer entrypoints.
-# Phase 0 targets only; later phases add lake/bi/orchestrate profiles.
+# Phase 0 = default services; Phase 1 = the `lake` profile (MinIO, catalog, Spark).
 
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help up down logs ps register status psql topics trades book clean
+.PHONY: help up down logs ps register status psql topics trades book clean \
+        lake lake-down lake-logs
 
 help: ## show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -44,3 +45,15 @@ trades: ## show the latest trade CDC messages
 
 book: ## show the latest orderbook CDC messages (insert/update/delete)
 	$(COMPOSE) exec redpanda rpk topic consume crypto.public.orderbook_levels --num 5 --offset end
+
+# --- Phase 1: lakehouse (needs the default stack from `make up` running) ------
+
+lake: ## start the lake profile (MinIO, catalog, Spark Bronze/Silver)
+	$(COMPOSE) --profile lake up -d
+	@echo "Spark is running the Bronze+Silver streams — follow with: make lake-logs"
+
+lake-down: ## stop the lake profile services (keep volumes)
+	$(COMPOSE) --profile lake down
+
+lake-logs: ## tail the Spark driver logs (Bronze/Silver progress)
+	$(COMPOSE) logs -f --tail=100 spark
