@@ -35,7 +35,7 @@ Binance WS ─▶ Ingestor ─▶ PostgreSQL ─(logical replication)─▶ Debe
 ## Status
 
 - [x] **Phase 0** — Binance ingestor, Postgres schema, Debezium, Redpanda
-- [ ] Phase 1 — MinIO, catalog, Spark, Bronze, Silver (`MERGE INTO`)
+- [x] **Phase 1** — MinIO, catalog, Spark, Bronze, Silver (`MERGE INTO`)
 - [ ] Phase 2 — dbt Gold, star schema, `fct_ohlcv_1m`, SCD2, tests
 - [ ] Phase 3 — Trino, Superset, (Dagster), CI
 
@@ -99,3 +99,43 @@ rare, so either:
 make down      # stop, keep data
 make clean     # stop and wipe volumes (fresh start)
 ```
+
+---
+
+## Phase 1 — quickstart
+
+Phase 1 lands the CDC stream into Apache Iceberg via Spark Structured Streaming.
+It runs as the `lake` Compose profile (MinIO as the S3 object store, an Iceberg
+REST catalog, and a single local-mode Spark driver hosting both streams).
+
+With the Phase 0 stack already up (`make up`), start the lakehouse:
+
+```bash
+make lake        # start MinIO, the REST catalog, and Spark (Bronze + Silver)
+make lake-logs   # follow the Spark driver as it builds tables and streams
+```
+
+Give Spark a minute on first run — it downloads the Kafka connector into the
+`ivy` cache (cached across restarts). Streaming checkpoints live in the
+`checkpoints` volume, so a restart resumes where it left off.
+
+### What "working" looks like
+
+- Spark logs print `>>> namespaces + tables ready` then `>>> streaming started`.
+- **Bronze** (`lake.bronze.*`) grows continuously — one append-only table per
+  source table, holding the verbatim Debezium envelopes.
+- **Silver** (`lake.silver.*`) is the cleaned, typed, *current-state* tier built
+  with `MERGE INTO`: `trades` is insert-only (dedup on `(symbol_id, trade_id)`),
+  while `orderbook_levels` stays **bounded** — MERGE UPDATEs changed levels,
+  INSERTs new ones, and DELETEs a level when it empties (`op='d'` or qty 0).
+- Browse the data files in the **MinIO console** at <http://localhost:9001>
+  (`minioadmin` / `minioadmin`), bucket `warehouse`.
+
+### Teardown
+
+```bash
+make lake-down   # stop just the lake profile (keep Iceberg data in MinIO)
+```
+
+`make clean` still wipes **all** volumes — including the Iceberg warehouse and
+Spark checkpoints — for a fully fresh start.

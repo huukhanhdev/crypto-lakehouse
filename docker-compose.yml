@@ -211,6 +211,9 @@ services:
       AWS_SECRET_ACCESS_KEY: minioadmin
       AWS_REGION: us-east-1
       KAFKA_BOOTSTRAP: redpanda:9092
+      # "earliest" (default) backfills the whole CDC log; "latest" ingests only
+      # live data — used to smoke-test without replaying millions of old events.
+      STARTING_OFFSETS: ${STARTING_OFFSETS:-earliest}
     mem_limit: 3500m
     volumes:
       - ./spark/jobs:/app/jobs:ro

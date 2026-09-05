@@ -177,8 +177,15 @@ def decode(df: DataFrame) -> DataFrame:
     )
 
 
-def read_cdc_stream(spark, starting_offsets: str = "earliest", max_per_trigger: int = 20000):
-    """Read the CDC topics from Redpanda as a decoded streaming DataFrame."""
+def read_cdc_stream(spark, starting_offsets: str = None, max_per_trigger: int = 20000):
+    """Read the CDC topics from Redpanda as a decoded streaming DataFrame.
+
+    `starting_offsets` defaults to $STARTING_OFFSETS (env), else "earliest" so a
+    fresh run backfills the whole log. Set STARTING_OFFSETS=latest to smoke-test
+    against only live data without replaying millions of historical events.
+    """
+    if starting_offsets is None:
+        starting_offsets = os.getenv("STARTING_OFFSETS", "earliest")
     raw = (
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
