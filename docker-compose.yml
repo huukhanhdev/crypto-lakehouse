@@ -131,7 +131,7 @@ services:
   minio:
     image: minio/minio:RELEASE.2024-09-13T20-26-02Z
     container_name: crypto-minio
-    profiles: ["lake"]
+    profiles: ["lake", "gold"]   # Gold layer (Trino) reads the same object store
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -151,7 +151,7 @@ services:
   mc:
     image: minio/mc:RELEASE.2024-09-16T17-43-14Z
     container_name: crypto-mc
-    profiles: ["lake"]
+    profiles: ["lake", "gold"]
     depends_on:
       minio:
         condition: service_healthy
@@ -167,7 +167,7 @@ services:
   rest:
     image: tabulario/iceberg-rest:1.6.0
     container_name: crypto-rest
-    profiles: ["lake"]
+    profiles: ["lake", "gold"]   # Trino uses this same REST catalog
     user: root                     # write the sqlite catalog on the mounted volume
     depends_on:
       minio:
@@ -227,6 +227,44 @@ services:
       --conf spark.jars.packages=org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.5
       /app/jobs/main.py
     restart: unless-stopped
+
+  # --- Trino (query engine): serves the Iceberg lake to dbt + BI --------------
+  # Phase 2: dbt-trino builds the Gold star schema through this coordinator.
+  trino:
+    image: trinodb/trino:468
+    container_name: crypto-trino
+    profiles: ["gold"]
+    depends_on:
+      minio:
+        condition: service_healthy
+      rest:
+        condition: service_healthy
+    ports:
+      - "8085:8080"              # host 8085 (8080 is taken by redpanda console)
+    # Only the catalog file is mounted; the image ships a working single-node
+    # config/jvm and auto-sizes its memory pools from the container limit.
+    volumes:
+      - ./infra/trino/etc/catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties:ro
+    mem_limit: 4g
+    restart: unless-stopped
+
+  # --- dbt (dbt-trino): builds the Gold layer; run once, then exits -----------
+  dbt:
+    build: ./dbt
+    container_name: crypto-dbt
+    profiles: ["gold"]
+    depends_on:
+      trino:
+        condition: service_started
+    environment:
+      DBT_PROFILES_DIR: /dbt
+    volumes:
+      - ./dbt:/dbt
+    working_dir: /dbt
+    # invoked explicitly via `docker compose run --rm dbt <cmd>` (see Makefile)
+    entrypoint: ["dbt"]
+    command: ["build"]
+    restart: "no"
 
 volumes:
   pgdata:

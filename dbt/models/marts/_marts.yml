@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: dim_symbol
+    description: "SCD2 symbol dimension (one row per version; is_current flags live)."
+    columns:
+      - name: symbol_version_key
+        tests: [unique, not_null]
+      - name: symbol_id
+        tests: [not_null]
+
+  - name: dim_exchange
+    columns:
+      - name: exchange_key
+        tests: [unique, not_null]
+
+  - name: dim_date
+    columns:
+      - name: date_key
+        tests: [unique, not_null]
+
+  - name: dim_time
+    columns:
+      - name: time_key
+        tests: [unique, not_null]
+
+  - name: fct_trades
+    description: "One row per trade."
+    columns:
+      - name: trade_id
+        tests: [not_null]
+      - name: symbol_id
+        tests: [not_null]
+      - name: taker_side
+        tests:
+          - accepted_values:
+              values: ['buy', 'sell']
+
+  - name: fct_ohlcv_1m
+    description: "Symbol × minute OHLCV bars."
+    columns:
+      - name: symbol_id
+        tests: [not_null]
+      - name: bar_minute
+        tests: [not_null]
+
+  - name: fct_book_snapshot
+    description: "Current top-of-book per symbol."
+    columns:
+      - name: symbol_id
+        tests: [unique, not_null]
+      - name: spread
+        tests: [not_null]

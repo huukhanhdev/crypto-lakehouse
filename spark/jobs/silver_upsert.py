@@ -37,7 +37,7 @@ def _merge_orderbook(spark, batch):
         F.coalesce(a["price_level"], b["price_level"]).cast(common.DEC).alias("price_level"),
         a["quantity"].cast(common.DEC).alias("quantity"),
         F.coalesce(a["last_update_id"], b["last_update_id"]).alias("last_update_id"),
-        F.timestamp_millis(F.coalesce(a["updated_at"], b["updated_at"])).alias("updated_at"),
+        common.to_ts(F.coalesce(a["updated_at"], b["updated_at"])).alias("updated_at"),
         (
             (F.col("op") == "d") | (F.coalesce(a["quantity"], F.lit("0")).cast(common.DEC) == 0)
         ).alias("deleted"),
@@ -78,8 +78,8 @@ def _merge_trades(spark, batch):
             a["quantity"].cast(common.DEC).alias("quantity"),
             a["quote_qty"].cast(common.DEC).alias("quote_qty"),
             a["is_buyer_maker"].alias("is_buyer_maker"),
-            F.timestamp_millis(a["trade_time"]).alias("trade_time"),
-            F.timestamp_millis(a["ingested_at"]).alias("ingested_at"),
+            common.to_ts(a["trade_time"]).alias("trade_time"),
+            common.to_ts(a["ingested_at"]).alias("ingested_at"),
         )
         .filter(F.col("trade_id").isNotNull())
         .dropDuplicates(["symbol_id", "trade_id"])
@@ -108,7 +108,7 @@ def _merge_dim(spark, batch, table, schema, key):
     def col_expr(name):
         c = F.coalesce(a[name], b[name])
         if name in ts_cols:
-            return F.timestamp_millis(c).alias(name)
+            return common.to_ts(c).alias(name)
         if name in dec_cols:
             return c.cast(common.DEC).alias(name)
         return c.alias(name)

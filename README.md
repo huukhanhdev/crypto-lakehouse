@@ -36,8 +36,8 @@ Binance WS ─▶ Ingestor ─▶ PostgreSQL ─(logical replication)─▶ Debe
 
 - [x] **Phase 0** — Binance ingestor, Postgres schema, Debezium, Redpanda
 - [x] **Phase 1** — MinIO, catalog, Spark, Bronze, Silver (`MERGE INTO`)
-- [ ] Phase 2 — dbt Gold, star schema, `fct_ohlcv_1m`, SCD2, tests
-- [ ] Phase 3 — Trino, Superset, (Dagster), CI
+- [x] **Phase 2** — Trino + dbt Gold, star schema, `fct_ohlcv_1m`, SCD2, tests
+- [ ] Phase 3 — Superset, (Dagster), CI
 
 ---
 
@@ -139,3 +139,67 @@ make lake-down   # stop just the lake profile (keep Iceberg data in MinIO)
 
 `make clean` still wipes **all** volumes — including the Iceberg warehouse and
 Spark checkpoints — for a fully fresh start.
+
+---
+
+## Phase 2 — quickstart
+
+Phase 2 builds the **Gold** star schema with **dbt-trino**. Trino queries the
+*same* Iceberg REST catalog + MinIO that Phase 1 writes, so dbt reads the Silver
+tables directly and materialises dimensional models into the `gold` namespace.
+It runs as the `gold` Compose profile (MinIO, the REST catalog, and Trino).
+
+Phase 2 only needs the Silver tables to exist in MinIO (from a `make lake` run);
+the streaming stack does **not** have to be running.
+
+```bash
+make gold        # start Trino, then `dbt build` (snapshot + models + tests)
+```
+
+> **One-time repair.** Silver was first written with a timestamp-parsing bug (the
+> Debezium `timestamptz` columns are ISO-8601 strings, not epoch millis — see
+> DECISIONS D2.5). The Spark code is fixed; to backfill data already in MinIO,
+> run `make gold-repair` once (rebuilds `silver.trades` from Bronze via Trino, no
+> Spark needed) before `make gold`.
+
+### The model
+
+- **Dimensions** — `dim_symbol` (**SCD2** on `status` via a dbt snapshot,
+  exposing `valid_from`/`valid_to`/`is_current`), `dim_exchange`, `dim_date`,
+  `dim_time` (minute grain).
+- **Facts** — `fct_trades` (one row per trade), `fct_ohlcv_1m` (symbol × minute
+  OHLCV rolled up from trades), `fct_book_snapshot` (current top-of-book per
+  symbol: best bid/ask + non-negative spread).
+- **Tests** — spread ≥ 0; exactly one `is_current` per symbol; no overlapping
+  SCD2 validity windows; unique `(symbol_id, trade_id)` and `(symbol, minute)`;
+  plus the usual not-null/unique/accepted-values checks. `dbt build` is green.
+
+### What "working" looks like
+
+- `make gold` ends with `Done. PASS=30 ... ERROR=0`.
+- Query Gold through Trino (host port **8085**), e.g. with any Trino client:
+
+  ```sql
+  SELECT symbol_id, best_bid, best_ask, spread FROM iceberg.gold.fct_book_snapshot;
+  SELECT * FROM iceberg.gold.fct_ohlcv_1m WHERE symbol_id = 1 ORDER BY bar_minute DESC LIMIT 5;
+  ```
+
+### Demonstrating SCD2
+
+With the full stack running, flip a symbol's status (see Phase 0), let Silver
+apply it, then re-run the snapshot — `dim_symbol` gains a second version and the
+old row's `is_current` flips to false:
+
+```bash
+make gold-build   # re-runs `dbt snapshot` as part of build
+```
+
+### Teardown
+
+```bash
+make gold-down    # stop Trino + catalog (keep Iceberg data in MinIO)
+```
+
+> **Note.** The demo REST catalog (SQLite) can occasionally wedge its WAL and
+> return `SQLITE_BUSY_SNAPSHOT` on commit. If a build fails that way, restart it
+> with `docker compose --profile gold restart rest` and re-run `make gold`.

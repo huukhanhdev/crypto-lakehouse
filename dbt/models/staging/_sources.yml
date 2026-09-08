@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: silver
+    description: "Cleaned, typed, current-state tier written by the Phase 1 Spark job."
+    database: iceberg        # Trino catalog
+    schema: silver           # Iceberg namespace lake.silver
+    tables:
+      - name: symbols
+      - name: exchanges
+      - name: trades
+      - name: orderbook_levels

@@ -34,8 +34,11 @@ FACT_TABLES = ["trades", "orderbook_levels"]  # bronze partitions these by symbo
 DEC = "decimal(38,18)"
 
 # --- after/before payload schemas (Debezium, schemas.enable=false) ----------
-# decimal.handling.mode=string  -> numerics arrive as strings
-# time.precision.mode=connect   -> timestamps arrive as epoch millis (long)
+# decimal.handling.mode=string -> numerics arrive as strings.
+# The temporal columns are Postgres `timestamptz`, which Debezium maps to
+# io.debezium.time.ZonedTimestamp -> ISO-8601 *strings* ("2026-09-05T13:07:49.750000Z"),
+# regardless of time.precision.mode. So they parse as StringType and are turned
+# into real timestamps with `to_ts()` below (NOT timestamp_millis — see DECISIONS D2.5).
 TRADES_SCHEMA = StructType([
     StructField("trade_id", LongType()),
     StructField("symbol_id", LongType()),
@@ -43,8 +46,8 @@ TRADES_SCHEMA = StructType([
     StructField("quantity", StringType()),
     StructField("quote_qty", StringType()),
     StructField("is_buyer_maker", BooleanType()),
-    StructField("trade_time", LongType()),
-    StructField("ingested_at", LongType()),
+    StructField("trade_time", StringType()),
+    StructField("ingested_at", StringType()),
 ])
 
 OB_SCHEMA = StructType([
@@ -53,7 +56,7 @@ OB_SCHEMA = StructType([
     StructField("price_level", StringType()),
     StructField("quantity", StringType()),
     StructField("last_update_id", LongType()),
-    StructField("updated_at", LongType()),
+    StructField("updated_at", StringType()),
 ])
 
 SYMBOLS_SCHEMA = StructType([
@@ -64,16 +67,26 @@ SYMBOLS_SCHEMA = StructType([
     StructField("status", StringType()),
     StructField("tick_size", StringType()),
     StructField("step_size", StringType()),
-    StructField("created_at", LongType()),
-    StructField("updated_at", LongType()),
+    StructField("created_at", StringType()),
+    StructField("updated_at", StringType()),
 ])
 
 EXCHANGES_SCHEMA = StructType([
     StructField("exchange_id", LongType()),
     StructField("name", StringType()),
     StructField("region", StringType()),
-    StructField("updated_at", LongType()),
+    StructField("updated_at", StringType()),
 ])
+
+# Debezium ZonedTimestamp is ISO-8601 with up to microsecond precision and a
+# zone offset (always `Z`/UTC here). Fraction is optional so partial-second
+# values still parse.
+ISO_TS_FMT = "yyyy-MM-dd'T'HH:mm:ss[.SSSSSS]X"
+
+
+def to_ts(col):
+    """Parse a Debezium ISO-8601 timestamp string into a Spark timestamp (UTC)."""
+    return F.to_timestamp(col, ISO_TS_FMT)
 
 
 # --- DDL --------------------------------------------------------------------

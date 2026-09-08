@@ -1,0 +1,25 @@
+name: crypto_gold
+version: "2.0.0"
+config-version: 2
+profile: crypto_gold
+
+model-paths: ["models"]
+snapshot-paths: ["snapshots"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  crypto_gold:
+    # staging is inlined (no DB objects) — see DECISIONS D2.4
+    staging:
+      +materialized: ephemeral
+    marts:
+      +materialized: table
+      # Iceberg REST catalog supports atomic CREATE OR REPLACE; use it so reruns
+      # are idempotent without rename gymnastics.
+      +on_table_exists: replace
+
+snapshots:
+  crypto_gold:
+    +target_schema: gold
